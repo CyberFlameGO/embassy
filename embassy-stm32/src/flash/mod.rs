@@ -1,4 +1,4 @@
-use crate::pac;
+use crate::pac::{self, flash::regs};
 use crate::peripherals::FLASH;
 use core::convert::TryInto;
 use core::marker::PhantomData;
@@ -10,11 +10,39 @@ use embedded_storage::nor_flash::{
     ErrorType, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash,
 };
 
-const FLASH_SIZE: usize = 0x3FFFF;
 const FLASH_BASE: usize = 0x8000000;
-const FLASH_START: usize = FLASH_BASE;
-const FLASH_END: usize = FLASH_START + FLASH_SIZE;
-const PAGE_SIZE: usize = 2048;
+
+#[cfg(flash_l4)]
+mod config {
+    use super::*;
+    pub(crate) const FLASH_SIZE: usize = 0x100000;
+    pub(crate) const FLASH_START: usize = FLASH_BASE;
+    pub(crate) const FLASH_END: usize = FLASH_START + FLASH_SIZE;
+    pub(crate) const PAGE_SIZE: usize = 2048;
+    pub(crate) const WORD_SIZE: usize = 8;
+}
+
+#[cfg(flash_wl55)]
+mod config {
+    use super::*;
+    pub(crate) const FLASH_SIZE: usize = 0x40000;
+    pub(crate) const FLASH_START: usize = FLASH_BASE;
+    pub(crate) const FLASH_END: usize = FLASH_START + FLASH_SIZE;
+    pub(crate) const PAGE_SIZE: usize = 2048;
+    pub(crate) const WORD_SIZE: usize = 8;
+}
+
+#[cfg(flash_l0x2)]
+mod config {
+    use super::*;
+    pub(crate) const FLASH_SIZE: usize = 0x30000;
+    pub(crate) const FLASH_START: usize = FLASH_BASE;
+    pub(crate) const FLASH_END: usize = FLASH_START + FLASH_SIZE;
+    pub(crate) const PAGE_SIZE: usize = 128;
+    pub(crate) const WORD_SIZE: usize = 4;
+}
+
+use config::*;
 
 pub struct Flash<'d> {
     _inner: FLASH,
@@ -32,22 +60,40 @@ impl<'d> Flash<'d> {
 
     pub fn unlock(p: impl Unborrow<Target = FLASH>) -> Self {
         let flash = Self::new(p);
-        let f = pac::FLASH;
+        #[cfg(any(flash_wl55, flash_l4))]
         unsafe {
-            f.keyr().write(|w| w.set_keyr(0x4567_0123));
-            f.keyr().write(|w| w.set_keyr(0xCDEF_89AB));
+            pac::FLASH.keyr().write(|w| w.set_keyr(0x4567_0123));
+            pac::FLASH.keyr().write(|w| w.set_keyr(0xCDEF_89AB));
+        }
+
+        #[cfg(any(flash_l0x2))]
+        unsafe {
+            pac::FLASH.pekeyr().write(|w| w.set_pekeyr(0x89ABCDEF));
+            pac::FLASH.pekeyr().write(|w| w.set_pekeyr(0x02030405));
+            pac::FLASH.prgkeyr().write(|w| w.set_prgkeyr(0x8C9DAEBF));
+            pac::FLASH.prgkeyr().write(|w| w.set_prgkeyr(0x13141516));
+            pac::FLASH.optkeyr().write(|w| w.set_optkeyr(0xFBEAD9C8));
         }
         flash
     }
 
     pub fn lock(&mut self) {
-        let f = pac::FLASH;
+        #[cfg(any(flash_wl55, flash_l4))]
         unsafe {
-            f.cr().modify(|w| w.set_lock(false));
+            pac::FLASH.cr().modify(|w| w.set_lock(false));
+        }
+
+        #[cfg(any(flash_l0x2))]
+        unsafe {
+            pac::FLASH.pecr().modify(|w| {
+                w.set_optlock(false);
+                w.set_prglock(false);
+                w.set_pelock(false);
+            });
         }
     }
 
-    pub fn blocking_read(&mut self, mut offset: u32, bytes: &mut [u8]) -> Result<(), Error> {
+    pub fn blocking_read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Error> {
         if offset as usize >= FLASH_END || offset as usize + bytes.len() > FLASH_END {
             return Err(Error::Size);
         }
@@ -67,25 +113,23 @@ impl<'d> Flash<'d> {
 
         self.clear_all_err();
 
-        let f = pac::FLASH;
+        #[cfg(any(flash_wl55, flash_l4))]
         unsafe {
-            f.cr().write(|w| w.set_pg(true));
+            pac::FLASH.cr().write(|w| w.set_pg(true));
         }
 
         let mut ret: Result<(), Error> = Ok(());
         let mut offset = offset;
-        for chunk in buf.chunks(8) {
-            unsafe {
-                write_volatile(
-                    offset as *mut u32,
-                    u32::from_le_bytes(chunk[0..4].try_into().unwrap()),
-                );
-                write_volatile(
-                    (offset + 4) as *mut u32,
-                    u32::from_le_bytes(chunk[4..8].try_into().unwrap()),
-                );
+        for chunk in buf.chunks(WORD_SIZE) {
+            for val in chunk.chunks(4) {
+                unsafe {
+                    write_volatile(
+                        offset as *mut u32,
+                        u32::from_le_bytes(chunk[0..4].try_into().unwrap()),
+                    );
+                }
+                offset += val.len() as u32;
             }
-            offset += chunk.len() as u32;
 
             ret = self.blocking_wait_ready();
             if ret.is_err() {
@@ -93,8 +137,9 @@ impl<'d> Flash<'d> {
             }
         }
 
+        #[cfg(any(flash_wl55, flash_l4))]
         unsafe {
-            f.cr().write(|w| w.set_pg(false));
+            pac::FLASH.cr().write(|w| w.set_pg(false));
         }
 
         ret
@@ -111,13 +156,14 @@ impl<'d> Flash<'d> {
         self.clear_all_err();
 
         for page in (from..to).step_by(PAGE_SIZE) {
-            let f = pac::FLASH;
             let idx = page / PAGE_SIZE as u32;
+
+            #[cfg(any(flash_wl55, flash_l4))]
             unsafe {
-                f.cr().modify(|w| {
+                pac::FLASH.cr().modify(|w| {
                     w.set_per(true);
                     w.set_pnb(idx as u8);
-                    #[cfg(any(flash_wl55, flash_l0x2))]
+                    #[cfg(any(flash_wl55))]
                     w.set_strt(true);
                     #[cfg(any(flash_l4))]
                     w.set_start(true);
@@ -126,8 +172,9 @@ impl<'d> Flash<'d> {
 
             let ret: Result<(), Error> = self.blocking_wait_ready();
 
+            #[cfg(any(flash_wl55, flash_l4))]
             unsafe {
-                f.cr().modify(|w| w.set_per(false));
+                pac::FLASH.cr().modify(|w| w.set_per(false));
             }
 
             if ret.is_err() {
@@ -140,10 +187,10 @@ impl<'d> Flash<'d> {
 
     fn blocking_wait_ready(&self) -> Result<(), Error> {
         loop {
-            let f = pac::FLASH;
-            let sr = unsafe { f.sr().read() };
+            let sr = unsafe { pac::FLASH.sr().read() };
 
             if !sr.bsy() {
+                #[cfg(any(flash_wl55, flash_l4))]
                 if sr.progerr() {
                     return Err(Error::Prog);
                 }
@@ -160,10 +207,12 @@ impl<'d> Flash<'d> {
                     return Err(Error::Size);
                 }
 
+                #[cfg(any(flash_wl55, flash_l4))]
                 if sr.miserr() {
                     return Err(Error::Miss);
                 }
 
+                #[cfg(any(flash_wl55, flash_l4))]
                 if sr.pgserr() {
                     return Err(Error::Seq);
                 }
@@ -173,20 +222,8 @@ impl<'d> Flash<'d> {
     }
 
     fn clear_all_err(&mut self) {
-        let f = pac::FLASH;
         unsafe {
-            f.sr().write(|w| {
-                w.set_rderr(false);
-                w.set_fasterr(false);
-                w.set_miserr(false);
-                w.set_pgserr(false);
-                w.set_sizerr(false);
-                w.set_pgaerr(false);
-                w.set_wrperr(false);
-                w.set_progerr(false);
-                w.set_operr(false);
-                w.set_eop(false);
-            });
+            pac::FLASH.sr().write_value(regs::Sr(0));
         }
     }
 }

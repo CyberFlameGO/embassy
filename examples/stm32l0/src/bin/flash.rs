@@ -15,7 +15,6 @@ use panic_probe as _;
 
 fn config() -> embassy_stm32::Config {
     let mut config = embassy_stm32::Config::default();
-    config.rcc.enable_flash = true;
     config
 }
 
@@ -23,7 +22,7 @@ fn config() -> embassy_stm32::Config {
 async fn main(_spawner: Spawner, p: Peripherals) {
     info!("Hello Flash!");
 
-    const ADDR: u32 = 0x8036000;
+    const ADDR: u32 = 0x8026000;
 
     let mut f = Flash::unlock(p.FLASH);
 
