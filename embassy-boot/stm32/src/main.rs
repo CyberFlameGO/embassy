@@ -21,7 +21,12 @@ fn main() -> ! {
         }
     */
 
+    #[cfg(feature = "flash-2k")]
     let mut bl: BootLoader<2048> = BootLoader::default();
+
+    #[cfg(feature = "flash-128")]
+    let mut bl: BootLoader<128> = BootLoader::default();
+
     let mut flash = Flash::unlock(p.FLASH);
     let start = bl.prepare(&mut SingleFlashProvider::new(&mut flash));
     core::mem::drop(flash);

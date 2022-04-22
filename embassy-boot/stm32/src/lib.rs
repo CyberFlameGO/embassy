@@ -4,10 +4,7 @@
 
 mod fmt;
 
-pub use embassy_boot::{
-    FirmwareUpdater, FlashProvider, Partition, SingleFlashProvider, State, BOOT_MAGIC,
-};
-use embedded_storage::nor_flash::{ErrorType, NorFlash, ReadNorFlash};
+pub use embassy_boot::{FirmwareUpdater, FlashProvider, Partition, SingleFlashProvider, State};
 
 pub struct BootLoader<const PAGE_SIZE: usize> {
     boot: embassy_boot::BootLoader<PAGE_SIZE>,
@@ -71,7 +68,6 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
         let mut p = cortex_m::Peripherals::steal();
         p.SCB.invalidate_icache();
         p.SCB.vtor.write(start as u32);
-        // cortex_m::asm::bootload(start as *const u32)
         //
 
         let sp = *(start as *const u32);
@@ -81,35 +77,10 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
         info!("RV: 0x{:x}", rv);
         USER_RESET = Some(core::mem::transmute(rv));
         cortex_m::register::msp::write(sp);
+        // cortex_m::asm::bootload(start as *const u32)
         (USER_RESET.unwrap())();
         loop {}
     }
 }
 
 static mut USER_RESET: Option<extern "C" fn()> = None;
-
-pub mod updater {
-    use super::*;
-    pub fn new() -> embassy_boot::FirmwareUpdater {
-        extern "C" {
-            static __bootloader_state_start: u32;
-            static __bootloader_state_end: u32;
-            static __bootloader_dfu_start: u32;
-            static __bootloader_dfu_end: u32;
-        }
-
-        let dfu = unsafe {
-            Partition::new(
-                &__bootloader_dfu_start as *const u32 as usize,
-                &__bootloader_dfu_end as *const u32 as usize,
-            )
-        };
-        let state = unsafe {
-            Partition::new(
-                &__bootloader_state_start as *const u32 as usize,
-                &__bootloader_state_end as *const u32 as usize,
-            )
-        };
-        embassy_boot::FirmwareUpdater::new(dfu, state)
-    }
-}

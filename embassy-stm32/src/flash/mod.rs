@@ -117,7 +117,7 @@ impl<'d> Flash<'d> {
                 f.cr().modify(|w| {
                     w.set_per(true);
                     w.set_pnb(idx as u8);
-                    #[cfg(any(flash_wl55, flash_l0))]
+                    #[cfg(any(flash_wl55, flash_l0x2))]
                     w.set_strt(true);
                     #[cfg(any(flash_l4))]
                     w.set_start(true);

@@ -2,8 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use embassy::time::{Duration, Timer};
-use embassy_boot_stm32::updater;
+use embassy_boot_stm32::FirmwareUpdater;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::flash::Flash;
 use embassy_stm32::gpio::{Input, Level, Output, Pull, Speed};
@@ -26,7 +25,7 @@ async fn main(_s: embassy::executor::Spawner, p: Peripherals) {
 
     let mut led = Output::new(p.PB9, Level::Low, Speed::Low);
 
-    let mut updater = updater::new();
+    let mut updater = FirmwareUpdater::default();
     button.wait_for_falling_edge().await;
     let mut offset = 0;
     for chunk in APP_B.chunks(2048) {
