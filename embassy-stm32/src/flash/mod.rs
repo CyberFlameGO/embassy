@@ -7,7 +7,7 @@ use embassy::util::Unborrow;
 use embassy_hal_common::unborrow;
 
 use embedded_storage::nor_flash::{
-    ErrorType, MultiwriteNorFlash, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash,
+    ErrorType, NorFlash, NorFlashError, NorFlashErrorKind, ReadNorFlash,
 };
 
 const FLASH_SIZE: usize = 0x3FFFF;

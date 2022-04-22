@@ -219,9 +219,11 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
 
                     // Overwrite magic and reset progress
                     let fstate = p.state().flash();
-                    fstate.write(self.state.from as u32, &[0; WRITE_SIZE])?;
+                    let aligned = Aligned([0; WRITE_SIZE]);
+                    fstate.write(self.state.from as u32, &aligned.0)?;
                     fstate.erase(self.state.from as u32, self.state.to as u32)?;
-                    fstate.write(self.state.from as u32, &[BOOT_MAGIC; WRITE_SIZE])?;
+                    let aligned = Aligned([BOOT_MAGIC; WRITE_SIZE]);
+                    fstate.write(self.state.from as u32, &aligned.0)?;
                 }
             }
             _ => {}
@@ -239,13 +241,13 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
     fn current_progress<P: FlashConfig>(&mut self, p: &mut P) -> Result<usize, BootError> {
         let max_index = ((self.state.len() - WRITE_SIZE) / WRITE_SIZE) - 1;
         let flash = p.flash();
+        let mut aligned = Aligned([0; WRITE_SIZE]);
         for i in 0..max_index {
-            let mut buf: [u8; WRITE_SIZE] = [0; WRITE_SIZE];
             flash.read(
                 (self.state.from + WRITE_SIZE + i * WRITE_SIZE) as u32,
-                &mut buf,
+                &mut aligned.0,
             )?;
-            if buf == [0xFF; WRITE_SIZE] {
+            if aligned.0 == [0xFF; WRITE_SIZE] {
                 return Ok(i);
             }
         }
@@ -255,7 +257,8 @@ impl<const PAGE_SIZE: usize> BootLoader<PAGE_SIZE> {
     fn update_progress<P: FlashConfig>(&mut self, idx: usize, p: &mut P) -> Result<(), BootError> {
         let flash = p.flash();
         let w = self.state.from + WRITE_SIZE + idx * WRITE_SIZE;
-        flash.write(w as u32, &[0, 0, 0, 0, 0, 0, 0, 0])?;
+        let aligned = Aligned([0; WRITE_SIZE]);
+        flash.write(w as u32, &aligned.0)?;
         Ok(())
     }
 
