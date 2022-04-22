@@ -15,6 +15,8 @@ use panic_probe as _;
 
 fn config() -> embassy_stm32::Config {
     let mut config = embassy_stm32::Config::default();
+    config.rcc.mux = embassy_stm32::rcc::ClockSrc::HSI16;
+    config.rcc.enable_hsi48 = true;
     config
 }
 
@@ -32,7 +34,7 @@ async fn main(_spawner: Spawner, p: Peripherals) {
     info!("Read: {=[u8]:x}", buf);
 
     info!("Erasing...");
-    unwrap!(f.erase(ADDR, ADDR + 2048));
+    unwrap!(f.erase(ADDR, ADDR + 128));
 
     info!("Reading...");
     let mut buf = [0u8; 8];

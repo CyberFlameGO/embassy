@@ -68,6 +68,7 @@ impl<'d> Flash<'d> {
 
         #[cfg(any(flash_l0x2))]
         unsafe {
+            info!("Unlocking flash!");
             pac::FLASH.pekeyr().write(|w| w.set_pekeyr(0x89ABCDEF));
             pac::FLASH.pekeyr().write(|w| w.set_pekeyr(0x02030405));
             pac::FLASH.prgkeyr().write(|w| w.set_prgkeyr(0x8C9DAEBF));
@@ -146,17 +147,30 @@ impl<'d> Flash<'d> {
     }
 
     pub fn blocking_erase(&mut self, from: u32, to: u32) -> Result<(), Error> {
+        info!("CHECKING range");
         if to < from || to as usize > FLASH_END {
             return Err(Error::Size);
         }
+        info!("CHECKING alignment");
         if from as usize % PAGE_SIZE != 0 || to as usize % PAGE_SIZE != 0 {
             return Err(Error::Unaligned);
         }
+        info!("Clearing error...");
 
-        self.clear_all_err();
+        info!("ERASING...");
 
         for page in (from..to).step_by(PAGE_SIZE) {
             let idx = page / PAGE_SIZE as u32;
+
+            #[cfg(any(flash_l0x2))]
+            unsafe {
+                info!("WRITE");
+                pac::FLASH.pecr().modify(|w| {
+                    w.set_erase(true);
+                    w.set_prog(true);
+                });
+                (page as *mut u32).write_volatile(0xFFFFFFFF);
+            }
 
             #[cfg(any(flash_wl55, flash_l4))]
             unsafe {
@@ -170,12 +184,15 @@ impl<'d> Flash<'d> {
                 });
             }
 
+            info!("WAITING UNTIL DONE");
             let ret: Result<(), Error> = self.blocking_wait_ready();
 
             #[cfg(any(flash_wl55, flash_l4))]
             unsafe {
                 pac::FLASH.cr().modify(|w| w.set_per(false));
             }
+
+            self.clear_all_err();
 
             if ret.is_err() {
                 return ret;
@@ -223,7 +240,40 @@ impl<'d> Flash<'d> {
 
     fn clear_all_err(&mut self) {
         unsafe {
-            pac::FLASH.sr().write_value(regs::Sr(0));
+            pac::FLASH.sr().modify(|w| {
+                if w.rderr() {
+                    w.set_rderr(false);
+                }
+                #[cfg(any(flash_wl55, flash_l4))]
+                if w.fasterr() {
+                    w.set_fasterr(false);
+                }
+                #[cfg(any(flash_wl55, flash_l4))]
+                if w.miserr() {
+                    w.set_miserr(false);
+                }
+                #[cfg(any(flash_wl55, flash_l4))]
+                if w.pgserr() {
+                    w.set_pgserr(false);
+                }
+                if w.sizerr() {
+                    w.set_sizerr(false);
+                }
+                if w.pgaerr() {
+                    w.set_pgaerr(false);
+                }
+                if w.wrperr() {
+                    w.set_wrperr(false);
+                }
+                #[cfg(any(flash_wl55, flash_l4))]
+                if w.progerr() {
+                    w.set_progerr(false);
+                }
+                #[cfg(any(flash_wl55, flash_l4))]
+                if w.operr() {
+                    w.set_operr(false);
+                }
+            });
         }
     }
 }
